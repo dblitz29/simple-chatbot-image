@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code + demo/ops helper scripts
 COPY app ./app
-COPY agent_demo.py create_dashboard.py create_ops.py ./
+COPY agent_demo.py create_dashboard.py create_ops.py error_demo.py ./
 
 EXPOSE 8000
 
