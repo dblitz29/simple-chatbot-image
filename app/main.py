@@ -37,7 +37,7 @@ async def health():
 
 
 @app.post("/analyze")
-async def analyze(
+def analyze(
     image: UploadFile = File(...),
     prompt: str = Form("Describe this image in detail."),
 ):
@@ -48,7 +48,7 @@ async def analyze(
             f"Allowed: {', '.join(sorted(ALLOWED_TYPES))}",
         )
 
-    data = await image.read()
+    data = image.file.read()
     if len(data) > MAX_BYTES:
         raise HTTPException(status_code=400, detail="Image too large (max 5 MB).")
 
@@ -61,18 +61,23 @@ async def analyze(
 
 
 @app.post("/agent")
-async def agent(
+def agent(
     image: UploadFile = File(...),
     prompt: str = Form("Assess this vehicle damage photo for an insurance reimbursement claim."),
 ):
-    """Run the instrumented insurance-claim agent (workflow > task > tool > llm)."""
+    """Run the instrumented insurance-claim agent (workflow > task > tool > llm).
+
+    Defined as a sync route so the whole LLMObs span chain (workflow/task/tool +
+    auto-instrumented Bedrock LLM span) runs in one threadpool thread with a
+    consistent context, avoiding async span-propagation errors.
+    """
     if image.content_type not in ALLOWED_TYPES:
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported file type: {image.content_type}.",
         )
 
-    data = await image.read()
+    data = image.file.read()
     if len(data) > MAX_BYTES:
         raise HTTPException(status_code=400, detail="Image too large (max 5 MB).")
 
