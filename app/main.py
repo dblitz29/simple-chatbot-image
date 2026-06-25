@@ -63,9 +63,9 @@ async def analyze(
 @app.post("/agent")
 async def agent(
     image: UploadFile = File(...),
-    prompt: str = Form("Describe this image and save a report."),
+    prompt: str = Form("Assess this vehicle damage photo for an insurance reimbursement claim."),
 ):
-    """Run the instrumented agentic workflow (workflow > task > tool > llm)."""
+    """Run the instrumented insurance-claim agent (workflow > task > tool > llm)."""
     if image.content_type not in ALLOWED_TYPES:
         raise HTTPException(
             status_code=400,

@@ -41,14 +41,22 @@ def _load_image():
 
 
 image_bytes, media_type = _load_image()
-result = run_agent(image_bytes, media_type, "Describe this image and save a report.")
+result = run_agent(
+    image_bytes,
+    media_type,
+    "Assess this vehicle damage photo for an insurance reimbursement claim.",
+)
 
-print("\n=== AGENT RESULT ===")
+print("\n=== CLAIM ASSESSMENT ===")
 print("Model:", result["model"])
 print("Tool calls:", [t["tool"] for t in result["tool_calls"]])
-print("Answer:", result["answer"])
+if result.get("decision"):
+    d = result["decision"]
+    print(f"Decision: {d['decision']}  | payout ${d['approved_payout_usd']}")
+    print(f"Damage: {d['damage_type']} ({d['severity']}), est ${d['estimated_cost_usd']}")
+print("Summary:", result["answer"])
 
 from ddtrace.llmobs import LLMObs
 
 LLMObs.flush()
-print("\nTrace flushed. Check Datadog LLM Observability -> workflow 'image_analysis_agent'.")
+print("\nTrace flushed. Check Datadog LLM Observability -> workflow 'insurance_claim_agent'.")

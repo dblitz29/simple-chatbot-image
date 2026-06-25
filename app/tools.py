@@ -39,6 +39,37 @@ TOOL_SPECS = [
     },
     {
         "toolSpec": {
+            "name": "assess_claim",
+            "description": (
+                "Apply the insurance policy rules to decide an auto claim. Call "
+                "this after you have classified the damage from the image. Returns "
+                "the decision (APPROVE / MANUAL_REVIEW / REJECT) and estimated "
+                "payout."
+            ),
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {
+                        "damage_type": {
+                            "type": "string",
+                            "description": "e.g. dented_bumper, broken_windshield, scratch, none.",
+                        },
+                        "severity": {
+                            "type": "string",
+                            "description": "One of: none, minor, moderate, severe.",
+                        },
+                        "estimated_cost_usd": {
+                            "type": "number",
+                            "description": "Estimated repair cost in USD.",
+                        },
+                    },
+                    "required": ["damage_type", "severity", "estimated_cost_usd"],
+                }
+            },
+        }
+    },
+    {
+        "toolSpec": {
             "name": "save_report",
             "description": (
                 "Save the final analysis to a text report file so the user can "
@@ -83,6 +114,53 @@ def get_image_properties(image_bytes: bytes, top_colors: int = 5, **_):
     }
 
 
+def assess_claim(
+    image_bytes: bytes,
+    damage_type: str = "unknown",
+    severity: str = "minor",
+    estimated_cost_usd: float = 0.0,
+    **_,
+):
+    """Deterministic insurance policy decision based on the classified damage."""
+    severity = (severity or "minor").lower().strip()
+    try:
+        cost = float(estimated_cost_usd or 0.0)
+    except (TypeError, ValueError):
+        cost = 0.0
+
+    DEDUCTIBLE = 250.0
+    REVIEW_THRESHOLD = 2000.0
+
+    if severity in ("none", "no damage", "") or cost <= 0:
+        decision = "REJECT"
+        payout = 0.0
+        rationale = "No assessable damage detected in the image."
+    elif severity == "severe" or cost > REVIEW_THRESHOLD:
+        decision = "MANUAL_REVIEW"
+        payout = 0.0
+        rationale = (
+            f"High severity or cost above ${REVIEW_THRESHOLD:.0f} threshold; "
+            "route to a human adjuster."
+        )
+    else:
+        decision = "APPROVE"
+        payout = round(max(cost - DEDUCTIBLE, 0.0), 2)
+        rationale = (
+            f"{severity.capitalize()} {damage_type} within auto-approval limits; "
+            f"payout = cost ${cost:.0f} minus ${DEDUCTIBLE:.0f} deductible."
+        )
+
+    return {
+        "damage_type": damage_type,
+        "severity": severity,
+        "estimated_cost_usd": cost,
+        "decision": decision,
+        "approved_payout_usd": payout,
+        "deductible_usd": DEDUCTIBLE,
+        "rationale": rationale,
+    }
+
+
 def save_report(image_bytes: bytes, title: str = "report", content: str = "", **_):
     os.makedirs(REPORTS_DIR, exist_ok=True)
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-") or "report"
@@ -96,6 +174,7 @@ def save_report(image_bytes: bytes, title: str = "report", content: str = "", **
 # Map tool name -> callable
 REGISTRY = {
     "get_image_properties": get_image_properties,
+    "assess_claim": assess_claim,
     "save_report": save_report,
 }
 

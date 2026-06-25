@@ -1,16 +1,19 @@
-"""Agentic image-analysis workflow, fully instrumented for Datadog LLM Obs.
+"""Agentic insurance-claim assessment workflow, fully instrumented for Datadog
+LLM Observability.
+
+Given a photo of damage (e.g. a vehicle), the agent inspects the image,
+classifies the damage, applies the policy rules via the `assess_claim` tool to
+decide APPROVE / MANUAL_REVIEW / REJECT, and saves a claim report.
 
 Span tree produced per run (visible in the LLM Observability trace explorer):
 
-    image_analysis_agent            (workflow)
+    insurance_claim_agent           (workflow)
     ├─ inspect_image                (tool)   - get_image_properties
     ├─ reasoning_step               (task)
     │   └─ Bedrock Converse         (llm)    - auto-instrumented
-    ├─ save_report                  (tool)   - when the model calls it
+    ├─ assess_claim                 (tool)   - policy decision
+    ├─ save_report                  (tool)
     └─ ...                          (task/llm/tool repeated until end_turn)
-
-Bedrock Converse calls are auto-captured as `llm` spans by ddtrace, nested
-under the decorated workflow/task spans here.
 """
 import time
 
@@ -38,6 +41,13 @@ def _tool_image_properties(image_bytes, **kwargs):
     return result
 
 
+@tool(name="assess_claim")
+def _tool_assess_claim(image_bytes, **kwargs):
+    result = toolkit.assess_claim(image_bytes, **kwargs)
+    LLMObs.annotate(input_data=kwargs, output_data=result)
+    return result
+
+
 @tool(name="save_report")
 def _tool_save_report(image_bytes, **kwargs):
     result = toolkit.save_report(image_bytes, **kwargs)
@@ -47,6 +57,7 @@ def _tool_save_report(image_bytes, **kwargs):
 
 _TOOL_FUNCS = {
     "get_image_properties": _tool_image_properties,
+    "assess_claim": _tool_assess_claim,
     "save_report": _tool_save_report,
 }
 
@@ -76,7 +87,7 @@ def _converse(messages, tool_config):
 
 
 # ── Workflow (the whole agent run = one trace) ──────────────────────────────
-@workflow(name="image_analysis_agent")
+@workflow(name="insurance_claim_agent")
 def run_agent(image_bytes: bytes, media_type: str, prompt: str) -> dict:
     image_format = _FORMAT_BY_MEDIA_TYPE.get(media_type)
     if image_format is None:
@@ -90,9 +101,13 @@ def run_agent(image_bytes: bytes, media_type: str, prompt: str) -> dict:
     tool_calls = [{"tool": "inspect_image", "result": props}]
 
     system_prompt = (
-        "You are an image analysis agent. You already have exact image "
-        f"properties: {props}. Analyze the image, and when finished call the "
-        "save_report tool to persist a short report."
+        "You are an auto-insurance claims assessor. Inspect the damage photo and: "
+        "(1) identify the damage_type, (2) rate severity as none/minor/moderate/"
+        "severe, (3) estimate repair cost in USD. Then call the assess_claim tool "
+        "with those values to get the policy decision (APPROVE / MANUAL_REVIEW / "
+        "REJECT). Finally call save_report with a concise claim summary including "
+        "the decision and payout. "
+        f"Exact image properties already extracted: {props}."
     )
 
     messages = [
@@ -100,7 +115,7 @@ def run_agent(image_bytes: bytes, media_type: str, prompt: str) -> dict:
             "role": "user",
             "content": [
                 {"image": {"format": image_format, "source": {"bytes": image_bytes}}},
-                {"text": f"{system_prompt}\n\nUser request: {prompt}"},
+                {"text": f"{system_prompt}\n\nClaim context: {prompt}"},
             ],
         }
     ]
@@ -142,6 +157,17 @@ def run_agent(image_bytes: bytes, media_type: str, prompt: str) -> dict:
         )
         break
 
-    out = {"answer": final_text, "tool_calls": tool_calls, "model": model_used}
+    # Surface the structured policy decision from the assess_claim tool call.
+    decision = next(
+        (tc["result"] for tc in tool_calls if tc["tool"] == "assess_claim"),
+        None,
+    )
+
+    out = {
+        "answer": final_text,
+        "decision": decision,
+        "tool_calls": tool_calls,
+        "model": model_used,
+    }
     LLMObs.annotate(output_data=final_text or out)
     return out
