@@ -1,12 +1,22 @@
 """Simple image analysis web app powered by AWS Bedrock."""
 import os
 
+from dotenv import load_dotenv
+
+# Load .env before anything reads environment variables.
+load_dotenv()
+
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 
 from app.bedrock import analyze_image
+from app.observability import setup_llm_observability
+
+# Enable Datadog LLM Observability before any Bedrock client is created so the
+# boto3/bedrock calls get auto-instrumented.
+setup_llm_observability()
 
 app = FastAPI(title="Image Analysis with Bedrock")
 templates = Jinja2Templates(directory="app/templates")

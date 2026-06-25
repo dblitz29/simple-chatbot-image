@@ -5,3 +5,7 @@ venv/
 .env
 .DS_Store
 .vscode/
+
+# Hackathon secrets — never commit
+shared/SCORING.md
+reports/
