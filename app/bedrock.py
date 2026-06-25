@@ -1,14 +1,27 @@
-"""Bedrock client helper for image analysis using Claude vision models."""
-import base64
-import json
+"""Bedrock client helper for image analysis using the Converse API.
+
+The Converse API uses one unified schema across all modern Bedrock models
+(Claude 3.x/4.x, etc.) and natively supports images, so we avoid model-specific
+request bodies.
+"""
 import os
 
 import boto3
 
 # Region & model are configurable via environment variables.
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-# Default to Claude 3.5 Sonnet (supports vision). Override with BEDROCK_MODEL_ID.
-MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20240620-v1:0")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1").strip()
+MODEL_ID = os.getenv(
+    "BEDROCK_MODEL_ID", "anthropic.claude-haiku-4-5-20251001-v1:0"
+).strip()
+
+# Map HTTP content types to the format names Converse expects.
+_FORMAT_BY_MEDIA_TYPE = {
+    "image/jpeg": "jpeg",
+    "image/jpg": "jpeg",
+    "image/png": "png",
+    "image/gif": "gif",
+    "image/webp": "webp",
+}
 
 _client = None
 
@@ -22,36 +35,23 @@ def get_client():
 
 
 def analyze_image(image_bytes: bytes, media_type: str, prompt: str) -> str:
-    """Send an image + prompt to Bedrock and return the text analysis."""
-    encoded = base64.standard_b64encode(image_bytes).decode("utf-8")
+    """Send an image + prompt to Bedrock via Converse and return the text."""
+    image_format = _FORMAT_BY_MEDIA_TYPE.get(media_type)
+    if image_format is None:
+        raise ValueError(f"Unsupported media type: {media_type}")
 
-    body = {
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 1024,
-        "messages": [
+    response = get_client().converse(
+        modelId=MODEL_ID,
+        messages=[
             {
                 "role": "user",
                 "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": encoded,
-                        },
-                    },
-                    {"type": "text", "text": prompt},
+                    {"image": {"format": image_format, "source": {"bytes": image_bytes}}},
+                    {"text": prompt},
                 ],
             }
         ],
-    }
-
-    response = get_client().invoke_model(
-        modelId=MODEL_ID,
-        body=json.dumps(body),
-        contentType="application/json",
-        accept="application/json",
+        inferenceConfig={"maxTokens": 1024, "temperature": 0.2},
     )
 
-    payload = json.loads(response["body"].read())
-    return payload["content"][0]["text"]
+    return response["output"]["message"]["content"][0]["text"]
